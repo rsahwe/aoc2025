@@ -12,9 +12,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .enumerate()
                     .skip(skip)
                     .take(count + i + 1 - skip - 12)
-                    .try_fold((0, b'0'), |(ai, ac), (ni, nc)| Some(
-                        (nc > ac).then_some((ni, nc)).unwrap_or((ai, ac))
-                    ))
+                    .try_fold((0, b'0'), |(ai, ac), (ni, nc)| (nc > ac)
+                        .then_some((ni, nc))
+                        .or(Some((ai, ac))))
                     .map(|(index, chr)| (index + 1, number * 10 + (chr - b'0') as usize))
                     .unwrap())
                 .1)
