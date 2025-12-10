@@ -65,6 +65,112 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     xlines.sort_by(|(ya, (_, _)), (yb, (_, _))| ya.cmp(yb)); // Sort according to y position
 
+    println!("pre |xlines|: {}, pre |ylines|: {}", xlines.len(), ylines.len());
+
+    loop { // Merge parallel lines to eliminate extra checks
+        let mut done_something = false;
+
+        while let Some((i, (x, (ya, yb)))) = ylines.iter().enumerate().find(|(_, (_, (ya, yb)))| yb - ya == 1) {
+            let ((ai, (ay, (axa, axb))), (bi, (by, (bxa, bxb)))) = (
+                xlines.iter().enumerate().find(|(_, (y, (xa, xb)))| y == ya && (xa == x || xb == x)).expect("Bad code :("),
+                xlines.iter().enumerate().find(|(_, (y, (xa, xb)))| y == yb && (xa == x || xb == x)).expect("Bad code :("),
+            );
+
+            if axa == bxb || bxa == axb {
+                continue;
+            }
+
+            done_something = true;
+            
+            if axa < x {
+                if axa < bxa {
+                    let (si, (sx, (sya, syb))) = ylines.iter().enumerate().find(|(_, (x, (ya, _)))| x == bxa && ya == by).expect("Bad code :(");
+
+                    xlines[ai] = (*ay, (*axa, *bxa));
+                    xlines.remove(bi);
+                    ylines[si] = (*sx, (*sya, *syb - 1));
+                    ylines.remove(i);
+                } else {
+                    let (si, (sx, (sya, syb))) = ylines.iter().enumerate().find(|(_, (x, (_, yb)))| x == axa && yb == ay).expect("Bad code :(");
+
+                    xlines[bi] = (*by, (*bxa, *axa));
+                    xlines.remove(ai);
+                    ylines[si] = (*sx, (*sya, *syb + 1));
+                    ylines.remove(i);
+                }
+            } else {
+                if axb > bxb {
+                    let (si, (sx, (sya, syb))) = ylines.iter().enumerate().find(|(_, (x, (ya, _)))| x == bxb && ya == by).expect("Bad code :(");
+
+                    xlines[ai] = (*ay, (*bxb, *axb));
+                    xlines.remove(bi);
+                    ylines[si] = (*sx, (*sya, *syb - 1));
+                    ylines.remove(i);
+                } else {
+                    let (si, (sx, (sya, syb))) = ylines.iter().enumerate().find(|(_, (x, (_, yb)))| x == axb && yb == ay).expect("Bad code :(");
+
+                    xlines[bi] = (*by, (*axb, *bxb));
+                    xlines.remove(ai);
+                    ylines[si] = (*sx, (*sya, *syb + 1));
+                    ylines.remove(i);
+                }
+            }
+        }
+
+        while let Some((i, (y, (xa, xb)))) = xlines.iter().enumerate().find(|(_, (_, (xa, xb)))| xb - xa == 1) {
+            let ((ai, (ax, (aya, ayb))), (bi, (bx, (bya, byb)))) = (
+                ylines.iter().enumerate().find(|(_, (x, (ya, yb)))| x == xa && (ya == y || yb == y)).expect("Bad code :("),
+                ylines.iter().enumerate().find(|(_, (x, (ya, yb)))| x == xb && (ya == y || yb == y)).expect("Bad code :("),
+            );
+
+            if aya == byb || bya == ayb {
+                continue;
+            }
+
+            done_something = true;
+            
+            if aya < y {
+                if aya < bya {
+                    let (si, (sy, (sxa, sxb))) = xlines.iter().enumerate().find(|(_, (y, (xa, _)))| y == bya && xa == bx).expect("Bad code :(");
+
+                    ylines[ai] = (*ax, (*aya, *bya));
+                    ylines.remove(bi);
+                    xlines[si] = (*sy, (*sxa, *sxb - 1));
+                    xlines.remove(i);
+                } else {
+                    let (si, (sy, (sxa, sxb))) = xlines.iter().enumerate().find(|(_, (y, (_, xb)))| y == aya && xb == ax).expect("Bad code :(");
+
+                    ylines[bi] = (*bx, (*bya, *aya));
+                    ylines.remove(ai);
+                    xlines[si] = (*sy, (*sxa, *sxb + 1));
+                    xlines.remove(i);
+                }
+            } else {
+                if ayb > byb {
+                    let (si, (sy, (sxa, sxb))) = xlines.iter().enumerate().find(|(_, (y, (xa, _)))| y == byb && xa == bx).expect("Bad code :(");
+
+                    ylines[ai] = (*ax, (*byb, *ayb));
+                    ylines.remove(bi);
+                    xlines[si] = (*sy, (*sxa, *sxb - 1));
+                    xlines.remove(i);
+                } else {
+                    let (si, (sy, (sxa, sxb))) = xlines.iter().enumerate().find(|(_, (y, (_, xb)))| y == ayb && xb == ax).expect("Bad code :(");
+
+                    ylines[bi] = (*bx, (*ayb, *byb));
+                    ylines.remove(ai);
+                    xlines[si] = (*sy, (*sxa, *sxb + 1));
+                    xlines.remove(i);
+                }
+            }
+        }
+
+        if !done_something {
+            break
+        }
+    }
+
+    println!("post |xlines|: {}, post |ylines|: {}", xlines.len(), ylines.len());
+
     let sum = (0..(points.len() - 1)) // All possible first corners
         .into_par_iter() // rayon ftw
         .map(|a| {

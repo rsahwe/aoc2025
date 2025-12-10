@@ -1,4 +1,4 @@
-use std::{convert::identity, error::Error, fs};
+use std::{convert::identity, error::Error, fs, sync::{Mutex, atomic::AtomicUsize}};
 
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
@@ -65,11 +65,25 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     xlines.sort_by(|(ya, (_, _)), (yb, (_, _))| ya.cmp(yb)); // Sort according to y position
 
+    let progress_and_index = Mutex::new((0, 0));
+    let count = points.len() - 1;
+
     let sum = (0..(points.len() - 1)) // All possible first corners
         .into_par_iter() // rayon ftw
         .map(|a| {
+            {
+                let mut progress_and_index = progress_and_index.lock().unwrap();
+
+                progress_and_index.1 += 1;
+
+                if progress_and_index.1 * 100 / count > progress_and_index.0 {
+                    println!("{:02}%", progress_and_index.0);
+                    progress_and_index.0 = progress_and_index.1 * 100 / count;
+                }
+            }
+
             ((a + 1)..points.len()) // All possible second corners
-                .filter(|b| points[a].0 != points[*b].0 && points[a].1 != points[*b].1) // Deduplicate points wtf??? (no performance hit anyway)
+                .filter(|b| points[a].0 != points[*b].0 && points[a].1 != points[*b].1) // Take only corners
                 .map(|b| (
                     points[a].0.min(points[b].0),
                     points[a].0.max(points[b].0),
@@ -77,34 +91,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                     points[a].1.max(points[b].1)
                 )) // Get "normalized" corners
                 .filter(|(xa, xb, ya, yb)| {
-                    // for dy in 0..((yb - ya) / 2) { // Treat each line separately for optimization
-                    //     let y = ya + 2 * dy + 1; // Dual grid y
+                    for dy in 0..((yb - ya) / 2) { // Treat each line separately for optimization
+                        let y = ya + 2 * dy + 1; // Dual grid y
 
-                    //     let mut position = *xa; // Saved position
+                        if xlines.iter().find(|(ly, (lxa, lxb))| (y - 1 == *ly || y + 1 == *ly) && lxa.min(xa) <= lxb.max(xb)).is_some() { // If a xline is parallel, check all points :(
+                            if !(0..((xb - xa) / 2)).all(|dx| in_area((xa + 1 + 2 * dx, y), &ylines, &xlines, &points)) {
+                                return false
+                            }
+                        } else {
+                            let mut position = *xa; // Saved position
 
-                    //     if !ylines // in_area only changes output if the point crosses a line so do that
-                    //         .iter()
-                    //         .filter(|(_, (yla, ylb))| *yla < y && y < *ylb) // Only relevant lines
-                    //         .skip_while(|(xl, (_, _))| xl <= xa)
-                    //         .map_while(|(xl, (_, _))| {
-                    //             if position + 1 >= *xb {
-                    //                 None
-                    //             } else {
-                    //                 let val = in_area((position + 1, y), &ylines, &xlines, &points);
-                    //                 position = if val { *xl } else { *xb };
-                    //                 Some(val)
-                    //             }
-                    //         })
-                    //         .all(identity)
-                    //     {
-                    //         if position + 1 >= *xb || !in_area((position + 1, y), &ylines, &xlines, &points) {
-                    //             return false
-                    //         };
-                    //     }
-                    // }
+                            if !ylines // in_area only changes output if the point crosses a line so do that
+                                .iter()
+                                .filter(|(_, (yla, ylb))| *yla < y && y < *ylb) // Only relevant lines
+                                .skip_while(|(xl, (_, _))| xl <= xa)
+                                .map_while(|(xl, (_, _))| {
+                                    if position + 1 >= *xb {
+                                        None
+                                    } else {
+                                        let val = in_area((position + 1, y), &ylines, &xlines, &points);
+                                        position = if val { *xl } else { *xb };
+                                        Some(val)
+                                    }
+                                })
+                                .all(identity)
+                            {
+                                if position + 1 >= *xb || !in_area((position + 1, y), &ylines, &xlines, &points) {
+                                    return false
+                                };
+                            }
+                        }
+                    }
 
-                    // true
-                    (0..((xb - xa) / 2)).all(|dx| (0..((yb - ya) / 2)).all(|dy| in_area((xa + 1 + 2 * dx, ya + 1 + 2 * dy), &ylines, &xlines, &points)))
+                    true
                 })
                 .map(|(xa, xb, ya, yb)| (xb - xa + 2 * 1) * (yb - ya + 2 * 1)) // Due to original grid being weird
                 .max()
@@ -112,6 +131,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         })
         .max()
         .unwrap() / 4; // Back from dual grid
+
+    println!("{:02}%", 100);
+    println!();
 
     println!("Sum: {sum}");
 
