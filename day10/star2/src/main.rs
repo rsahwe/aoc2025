@@ -1,58 +1,48 @@
-use std::{error::Error, fs, sync::Mutex, usize};
+use std::{error::Error, fs, usize};
 
 use::rayon::prelude::*;
-
-fn check_recursive(target: &Vec<usize>, state: &mut Vec<usize>, buttons: &[Vec<usize>], min_index: usize, depth: usize, mut max_depth: usize) -> usize {
-    if depth >= max_depth {
-        return usize::MAX;
-    }
-
-    if state == target {
-        depth
-    } else {
-        'outer: for (i, btn) in buttons.iter().enumerate().skip(min_index) {
-            for i in 0..target.len() {
-                state[i] += btn[i];
-                if state[i] > target[i] {
-                    for j in 0..=i {
-                        state[j] -= btn[j];
-                    }
-
-                    continue 'outer;
-                }
-            }
-
-            let val = check_recursive(target, state, buttons, i, depth + 1, max_depth);
-            if val < max_depth {
-                max_depth = val;
-            }
-            
-            for i in 0..target.len() {
-                state[i] -= btn[i];
-            }
-        }
-
-        max_depth
-    }
-}
+use z3::{Optimize, SatResult, ast::Int};
 
 fn activate_generator((_, buttons, joltage): (Vec<bool>, Vec<Vec<usize>>, Vec<usize>)) -> usize {
     let mut buttons = buttons.iter().map(|btn| btn.iter().fold(vec![0; joltage.len()], |mut acc, n| { acc[*n] = 1; acc })).collect::<Vec<_>>();
 
     buttons.sort_by(|a, b| b.iter().sum::<usize>().cmp(&a.iter().sum::<usize>()));
 
-    check_recursive(&joltage, &mut vec![0; joltage.len()], &buttons, 0, 0, usize::MAX)
+    let m = Optimize::new();
+
+    let buttons = buttons.into_iter().map(|v| v.into_iter().map(|e| Int::from_u64(e as u64)).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let button_counts = (0..buttons.len()).map(|i| Int::new_const(i.to_string())).collect::<Vec<_>>();
+
+    for bc in &button_counts {
+        m.assert(&bc.ge(Int::from_u64(0)));
+    }
+
+    let button_count_sum = button_counts.iter().fold(Int::from_u64(0), |acc, n| acc + n);
+
+    let joltage = joltage.into_iter().map(|j| Int::from_u64(j as u64)).collect::<Vec<_>>();
+    let button_products = buttons.into_iter().zip(button_counts.iter()).map(|(b, c)| b.into_iter().map(|v| c * v).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let button_results = (0..joltage.len()).map(|i| button_products.iter().map(|b| b[i].clone()).collect::<Vec<_>>()).collect::<Vec<_>>();
+    let button_joltage = button_results.into_iter().map(|br| br.into_iter().fold(Int::from_u64(0), |acc, n| acc + n)).collect::<Vec<_>>();
+
+    for (bj, j) in button_joltage.into_iter().zip(joltage.into_iter()) {
+        m.assert(&bj.eq(j));
+    }
+
+    let variable = Int::new_const("result");
+    m.assert(&variable.eq(button_count_sum));
+
+    m.minimize(&variable);
+
+    assert_eq!(m.check(&[]), SatResult::Sat);
+
+    m.get_model().expect("Missing model!!!").get_const_interp(&variable).expect("Missing sum!!!").as_u64().expect("Not a u64?") as usize
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let input = fs::read_to_string("../input1")?;
 
-    let count = input.lines().map(str::trim).filter(|line| line.len() > 0).count();
-    let progress_and_index = Mutex::new((0, 0));
-
     let sum = input
         .par_lines()
-        // .lines()
         .map(str::trim)
         .filter(|line| line.len() > 0)
         .map(|line| line.split(' ').collect::<Vec<_>>())
@@ -74,18 +64,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             )
         })
         .map(activate_generator)
-        .inspect(|_| {
-            let mut progress_and_index = progress_and_index.lock().unwrap();
-
-            *progress_and_index = (progress_and_index.0, progress_and_index.1 + 1);
-            if progress_and_index.1 * 100 / count > progress_and_index.0 {
-            *progress_and_index = (progress_and_index.1 * 100 / count, progress_and_index.1);
-                println!("{:02}%", progress_and_index.0);
-            }
-        })
         .sum::<usize>();
 
-    println!();
     println!("Sum: {sum}");
 
     Ok(())
